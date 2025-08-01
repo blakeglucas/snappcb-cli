@@ -1,8 +1,10 @@
 from gerbonara import GerberFile
 from gerbonara.graphic_objects import GraphicObject
 from gerbonara.graphic_primitives import Circle, Rectangle, Line
-from shapely import Polygon, Point, LineString, box, unary_union, Geometry
+import numpy as np
+from shapely import Polygon, Point, LineString, box, unary_union, Geometry, difference, polygonize
 from shapely.affinity import rotate, translate, scale
+from typing import Literal
 
 from context import Context
 
@@ -67,8 +69,8 @@ def trace_gerber(gf: GerberFile):
                 elif isinstance(prim, Line):
                     trace_segments.append(((prim.x1, prim.y1), (prim.x2, prim.y2), prim.width))
                 else:
-                    outline = getattr(prim, "outline", None)
-                    points = getattr(prim, "points", None)
+                    outline = getattr(prim, 'outline', None)
+                    points = getattr(prim, 'points', None)
                     if outline:
                         try:
                             polys.append(Polygon(outline))
@@ -111,5 +113,47 @@ def isolation_routing(ctx: Context) -> RoutingResult:
     return RoutingResult(ctx, fcu_geom, bcu_geom, edge_cuts_raw_geom, edge_cuts_geom)
     
 
-def ncc_routing(ctx: Context):
-    pass
+class NccRoutingOptions:
+    def __init__(self, direction: Literal['horizontal', 'vertical'] = 'horizontal'):
+        self.direction = direction
+
+
+def _route_ncc_layer(outer: Polygon, layer: Polygon, offset: float, options: NccRoutingOptions) -> Polygon:
+    horiz = options.direction == 'horizontal'
+    minx, miny, maxx, maxy = outer.bounds
+    lines = []
+    if horiz:
+        steps = np.arange(miny - offset, maxy + offset, offset)
+    else:
+        steps = np.arange(minx - offset, maxx + offset, offset)
+    for s in steps:
+        if horiz:
+            lines.append(LineString(((minx, s), (maxx, s))).buffer(0.0000001))
+        else:
+            lines.append(LineString(((s, miny), (s, maxy))).buffer(0.0000001))
+
+    return difference(unary_union(lines), layer)
+        
+
+def ncc_routing(ctx: Context, options: NccRoutingOptions = None) -> RoutingResult:
+    options = options if options else NccRoutingOptions()
+    if ctx.edge_cuts:
+        edge_cuts_raw_geom = trace_gerber(ctx.edge_cuts)
+    if ctx.fcu:
+        fcu_trace = trace_gerber(ctx.fcu)
+        boundary = edge_cuts_raw_geom if ctx.edge_cuts else fcu_trace.convex_hull
+        fcu_geom = _route_ncc_layer(boundary, fcu_trace, ctx.options.tool_mm / 2, options)
+        if ctx.options.edge_cuts_on_cu and ctx.edge_cuts:
+            fcu_geom = unary_union((fcu_geom, edge_cuts_raw_geom))
+    if ctx.bcu:
+        bcu_trace = trace_gerber(ctx.bcu)
+        boundary = edge_cuts_raw_geom if ctx.edge_cuts else bcu_trace.convex_hull
+        bcu_geom = _route_ncc_layer(boundary, bcu_trace, ctx.options.tool_mm / 2, options)
+        if ctx.options.edge_cuts_on_cu and ctx.edge_cuts:
+            bcu_geom = unary_union((bcu_geom, edge_cuts_raw_geom))
+        if ctx.options.mirror_bcu:
+            bcu_geom = scale(bcu_geom, xfact=-1)
+    if ctx.edge_cuts:
+        edge_cuts_geom = _route_edge_cuts(ctx, edge_cuts_raw_geom)
+    return RoutingResult(ctx, fcu_geom, bcu_geom, edge_cuts_raw_geom, edge_cuts_geom)
+    

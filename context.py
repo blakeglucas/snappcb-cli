@@ -6,18 +6,14 @@ from typing import Union
 class GlobalOptions:
     def __init__(self,
                  edge_cuts_on_cu = False,
-                 annotations_on_cu = False,
                  tool_mm = 0.125,
                  drl_dia_mm = 0,
                  cutout_dia_mm = 3,
-                 tabs = False,
                  mirror_bcu = True):
         self.edge_cuts_on_cu = edge_cuts_on_cu
-        self.annotations_on_cu = annotations_on_cu
         self.tool_mm = tool_mm
         self.drl_dia_mm = drl_dia_mm
         self.cutout_dia_mm = cutout_dia_mm
-        self.tabs = tabs
         self.mirror_bcu = mirror_bcu
 
 class Context:
