@@ -1,13 +1,12 @@
-from gerbonara import GerberFile
-from shapely import Polygon
+from gerbonara import ExcellonFile, GerberFile
+from shapely import Polygon, MultiPolygon
 from svgwrite import Drawing
-from typing import Union
 
 class GlobalOptions:
     def __init__(self,
                  edge_cuts_on_cu = False,
                  tool_mm = 0.125,
-                 drl_dia_mm = 0,
+                 drl_dia_mm = 1,
                  cutout_dia_mm = 3,
                  mirror_bcu = True):
         self.edge_cuts_on_cu = edge_cuts_on_cu
@@ -17,16 +16,17 @@ class GlobalOptions:
         self.mirror_bcu = mirror_bcu
 
 class Context:
-    __fcu: Union[GerberFile | None]
-    __bcu: Union[GerberFile | None]
-    __drl: None
-    __edge_cuts: Union[GerberFile | None]
+    __fcu: GerberFile | None
+    __bcu: GerberFile | None
+    __drl: GerberFile  | None
+    __edge_cuts: GerberFile | None
     __options: GlobalOptions
 
     def __init__(self,
                  fcu: str | GerberFile | None,
                  bcu: str | GerberFile | None,
                  edge_cuts: str | GerberFile | None,
+                 drl: str | ExcellonFile| GerberFile | None,
                  options: GlobalOptions | None = None
                  ):
         if fcu:
@@ -35,6 +35,18 @@ class Context:
             self.__bcu = GerberFile.open(bcu) if type(bcu) == str else bcu
         if edge_cuts:
             self.__edge_cuts = GerberFile.open(edge_cuts) if type(edge_cuts) == str else edge_cuts
+        if drl:
+            if isinstance(drl, GerberFile) or isinstance(drl, ExcellonFile):
+                # FIXME apparently these are the same in this library
+                self.__drl = drl
+            elif type(drl) == str:
+                if drl.endswith('.gbr'): # TODO more extensions? Autodetect format?
+                    self.__drl = GerberFile.open(drl)
+                else:
+                    self.__drl = ExcellonFile.open(drl)
+            else:
+                # TODO throw
+                pass
         self.__options = GlobalOptions() if options is None else options
 
     @property
@@ -50,11 +62,15 @@ class Context:
         return self.__edge_cuts
     
     @property
+    def drl(self):
+        return self.__drl
+    
+    @property
     def options(self):
         return self.__options
     
     @staticmethod
-    def generate_svg(geom: Polygon, output_file: str):
+    def generate_svg(geom: Polygon | MultiPolygon, output_file: str):
         minx, miny, maxx, maxy = geom.bounds
         w = maxx - minx
         h = maxy - miny

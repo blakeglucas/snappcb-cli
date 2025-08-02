@@ -1,8 +1,8 @@
-from gerbonara import GerberFile
+from gerbonara import GerberFile, utils
 from gerbonara.graphic_objects import GraphicObject
-from gerbonara.graphic_primitives import Circle, Rectangle, Line
+from gerbonara.graphic_primitives import Circle, Rectangle, Line, LengthUnit
 import numpy as np
-from shapely import Polygon, Point, LineString, box, unary_union, Geometry, difference, polygonize
+from shapely import Polygon, Point, LineString, box, unary_union, Geometry, difference
 from shapely.affinity import rotate, translate, scale
 from typing import Literal
 
@@ -57,7 +57,7 @@ def trace_gerber(gf: GerberFile):
     trace_segments: list[tuple] = []
     for obj in gf.objects:
         if isinstance(obj, GraphicObject):
-            prims = obj.to_primitives(unit='mm')
+            prims = obj.to_primitives(unit=utils.MM)
             for prim in prims:
                 if isinstance(prim, Circle):
                     polys.append(Point(prim.x, prim.y).buffer(prim.r))
@@ -157,3 +157,12 @@ def ncc_routing(ctx: Context, options: NccRoutingOptions = None) -> RoutingResul
         edge_cuts_geom = _route_edge_cuts(ctx, edge_cuts_raw_geom)
     return RoutingResult(ctx, fcu_geom, bcu_geom, edge_cuts_raw_geom, edge_cuts_geom)
     
+
+def drilling(ctx: Context) -> Polygon | None:
+    if ctx.edge_cuts:
+        edge_cuts_raw_geom = trace_gerber(ctx.edge_cuts)
+    if ctx.drl:
+        drl_geom = trace_gerber(ctx.drl).buffer(ctx.options.drl_dia_mm / -2)
+        # TODO detect drill diameter too small based on result
+        return drl_geom
+    return None
