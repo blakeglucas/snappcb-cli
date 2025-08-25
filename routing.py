@@ -2,11 +2,12 @@ from gerbonara import GerberFile, utils
 from gerbonara.graphic_objects import GraphicObject
 from gerbonara.graphic_primitives import Circle, Rectangle, Line, LengthUnit
 import numpy as np
-from shapely import Polygon, Point, LineString, box, unary_union, Geometry, difference
+from shapely import Polygon, MultiPolygon, Point, LineString, box, unary_union, Geometry, difference
 from shapely.affinity import rotate, translate, scale
 from typing import Literal
 
 from context import Context
+from exceptions import DrillingException, DrillSizeException
 
 
 class RoutingResult:
@@ -97,10 +98,14 @@ def _route_edge_cuts(ctx: Context, raw_geom: Polygon = None) -> Geometry:
 def isolation_routing(ctx: Context) -> RoutingResult:
     if ctx.edge_cuts:
         edge_cuts_raw_geom = trace_gerber(ctx.edge_cuts)
+    else:
+        edge_cuts_raw_geom = None
     if ctx.fcu:
         fcu_geom = trace_gerber(ctx.fcu).buffer(ctx.options.tool_mm / 2)
         if ctx.options.edge_cuts_on_cu and ctx.edge_cuts:
             fcu_geom = unary_union((fcu_geom, edge_cuts_raw_geom))
+    else:
+        fcu_geom = None
     if ctx.bcu:
         bcu_geom = trace_gerber(ctx.bcu).buffer(ctx.options.tool_mm / 2)
         if ctx.options.edge_cuts_on_cu and ctx.edge_cuts:
@@ -108,8 +113,12 @@ def isolation_routing(ctx: Context) -> RoutingResult:
         if ctx.options.mirror_bcu:
             # default behavior
             bcu_geom = scale(bcu_geom, xfact=-1)
+    else:
+        bcu_geom = None
     if ctx.edge_cuts:
         edge_cuts_geom = _route_edge_cuts(ctx, edge_cuts_raw_geom)
+    else:
+        edge_cuts_geom = None
     return RoutingResult(ctx, fcu_geom, bcu_geom, edge_cuts_raw_geom, edge_cuts_geom)
     
 
@@ -127,10 +136,7 @@ def _route_ncc_layer(outer: Polygon, layer: Polygon, offset: float, options: Ncc
     else:
         steps = np.arange(minx - offset, maxx + offset, offset)
     for s in steps:
-        if horiz:
-            lines.append(LineString(((minx, s), (maxx, s))).buffer(0.0000001))
-        else:
-            lines.append(LineString(((s, miny), (s, maxy))).buffer(0.0000001))
+        lines.append(LineString(((minx, s), (maxx, s)) if horiz else ((s, miny), (s, maxy))).buffer(0.0000001))
 
     return difference(unary_union(lines), layer)
         
@@ -139,12 +145,16 @@ def ncc_routing(ctx: Context, options: NccRoutingOptions = None) -> RoutingResul
     options = options if options else NccRoutingOptions()
     if ctx.edge_cuts:
         edge_cuts_raw_geom = trace_gerber(ctx.edge_cuts)
+    else:
+        edge_cuts_raw_geom = None
     if ctx.fcu:
         fcu_trace = trace_gerber(ctx.fcu)
         boundary = edge_cuts_raw_geom if ctx.edge_cuts else fcu_trace.convex_hull
         fcu_geom = _route_ncc_layer(boundary, fcu_trace, ctx.options.tool_mm / 2, options)
         if ctx.options.edge_cuts_on_cu and ctx.edge_cuts:
             fcu_geom = unary_union((fcu_geom, edge_cuts_raw_geom))
+    else:
+        fcu_geom = None
     if ctx.bcu:
         bcu_trace = trace_gerber(ctx.bcu)
         boundary = edge_cuts_raw_geom if ctx.edge_cuts else bcu_trace.convex_hull
@@ -153,16 +163,26 @@ def ncc_routing(ctx: Context, options: NccRoutingOptions = None) -> RoutingResul
             bcu_geom = unary_union((bcu_geom, edge_cuts_raw_geom))
         if ctx.options.mirror_bcu:
             bcu_geom = scale(bcu_geom, xfact=-1)
+    else:
+        bcu_geom = None
     if ctx.edge_cuts:
         edge_cuts_geom = _route_edge_cuts(ctx, edge_cuts_raw_geom)
+    else:
+        edge_cuts_geom = None
     return RoutingResult(ctx, fcu_geom, bcu_geom, edge_cuts_raw_geom, edge_cuts_geom)
     
 
-def drilling(ctx: Context) -> Polygon | None:
+def drilling(ctx: Context) -> Polygon | MultiPolygon | None:
     if ctx.edge_cuts:
         edge_cuts_raw_geom = trace_gerber(ctx.edge_cuts)
     if ctx.drl:
-        drl_geom = trace_gerber(ctx.drl).buffer(ctx.options.drl_dia_mm / -2)
-        # TODO detect drill diameter too small based on result
-        return drl_geom
+        drl_geom: MultiPolygon = trace_gerber(ctx.drl)
+        polys: list[Polygon] = []
+        drill_min_area = np.pi * (ctx.options.drl_dia_mm / 2)**2 
+        for geom in drl_geom.geoms:
+            if geom.area <= drill_min_area:
+                polys.append(geom.centroid.buffer(1))
+            else:
+                polys.append(geom.buffer(ctx.options.drl_dia_mm / -2))
+        return unary_union(polys)
     return None

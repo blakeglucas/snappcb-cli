@@ -16,10 +16,10 @@ class GlobalOptions:
         self.mirror_bcu = mirror_bcu
 
 class Context:
-    __fcu: GerberFile | None
-    __bcu: GerberFile | None
-    __drl: GerberFile  | None
-    __edge_cuts: GerberFile | None
+    __fcu: GerberFile | None = None
+    __bcu: GerberFile | None = None
+    __drl: GerberFile  | None = None
+    __edge_cuts: GerberFile | None = None
     __options: GlobalOptions
 
     def __init__(self,
